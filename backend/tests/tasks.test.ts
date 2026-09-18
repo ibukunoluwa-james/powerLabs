@@ -121,6 +121,16 @@ describe('POST /api/tasks', () => {
     expect(response.body.error.code).toBe('INVALID_JSON');
   });
 
+  it('rejects a body over the size limit with 413 rather than a 500', async () => {
+    const response = await api()
+      .post('/api/tasks')
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ title: 'x'.repeat(150_000) }));
+
+    expect(response.status).toBe(413);
+    expect(response.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
   it('flags a past due date as overdue', async () => {
     const task = await createTask({ dueDate: '2020-01-01T00:00:00.000Z' });
     expect(task.isOverdue).toBe(true);

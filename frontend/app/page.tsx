@@ -120,11 +120,15 @@ export default function TaskListPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Your tasks</h1>
         <p className="mt-1 text-sm text-slate-500">
-          {pagination && !loading
-            ? `${pagination.total} ${pagination.total === 1 ? 'task' : 'tasks'}${
-                hasFilters ? ' matching your filters' : ''
-              }`
-            : 'Loading…'}
+          {/* Three distinct states: a failed load must not keep claiming to be
+              loading underneath an error notice that says otherwise. */}
+          {loading
+            ? 'Loading…'
+            : loadError
+              ? 'Could not load your tasks'
+              : `${pagination?.total ?? 0} ${pagination?.total === 1 ? 'task' : 'tasks'}${
+                  hasFilters ? ' matching your filters' : ''
+                }`}
         </p>
       </div>
 

@@ -1,9 +1,9 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useState, useSyncExternalStore, type FormEvent } from 'react';
 import { ApiClientError, createTask, updateTask } from '@/lib/api';
-import { fromDateTimeLocalValue, toDateTimeLocalValue } from '@/lib/dates';
+import { combineDateAndTime, toDateInputValue, toTimeInputValue } from '@/lib/dates';
 import { STATUS_LABELS, TASK_STATUSES, type Task, type TaskStatus } from '@/lib/types';
 import { ErrorNotice, buttonStyles } from './ui';
 
@@ -15,14 +15,35 @@ interface TaskFormProps {
 const inputStyles =
   'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500';
 
+const subscribeToNothing = () => () => {};
+
+/**
+ * False during server rendering and until React has hydrated, true afterwards.
+ *
+ * Until the handler below is attached, pressing the submit button performs a
+ * *native* form submission: the browser navigates to the same page with the
+ * field values in the query string, which throws away what the user typed and
+ * puts it in their history. Disabling the button for that window is the cheapest
+ * way to make the form inert rather than destructive.
+ */
+function useHydrated() {
+  return useSyncExternalStore(
+    subscribeToNothing,
+    () => true,
+    () => false,
+  );
+}
+
 export function TaskForm({ task }: TaskFormProps) {
   const router = useRouter();
   const isEdit = task !== undefined;
+  const hydrated = useHydrated();
 
   const [title, setTitle] = useState(task?.title ?? '');
   const [description, setDescription] = useState(task?.description ?? '');
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'TODO');
-  const [dueDate, setDueDate] = useState(toDateTimeLocalValue(task?.dueDate ?? null));
+  const [dueDate, setDueDate] = useState(toDateInputValue(task?.dueDate ?? null));
+  const [dueTime, setDueTime] = useState(toTimeInputValue(task?.dueDate ?? null));
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -35,6 +56,9 @@ export function TaskForm({ task }: TaskFormProps) {
     if (!title.trim()) errors.title = 'Title is required';
     if (title.trim().length > 200) errors.title = 'Title must be 200 characters or fewer';
     if (description.length > 2000) errors.description = 'Description must be 2000 characters or fewer';
+    // A time on its own has nothing to attach to, and silently dropping it is
+    // exactly the failure this split was meant to remove.
+    if (!dueDate && dueTime) errors.dueDate = 'Pick a date, or clear the time';
     return errors;
   }
 
@@ -52,7 +76,7 @@ export function TaskForm({ task }: TaskFormProps) {
       // than stored as "".
       description: description.trim() === '' ? null : description.trim(),
       status,
-      dueDate: fromDateTimeLocalValue(dueDate),
+      dueDate: combineDateAndTime(dueDate, dueTime),
     };
 
     setSubmitting(true);
@@ -147,25 +171,43 @@ export function TaskForm({ task }: TaskFormProps) {
           <label htmlFor="dueDate" className="block text-sm font-medium text-slate-700">
             Due date
           </label>
-          <input
-            id="dueDate"
-            name="dueDate"
-            type="datetime-local"
-            value={dueDate}
-            onChange={(event) => setDueDate(event.target.value)}
-            aria-invalid={Boolean(fieldErrors.dueDate)}
-            className={`mt-1 ${inputStyles} ${fieldErrors.dueDate ? 'border-rose-400' : ''}`}
-          />
+          {/* Date and time are separate controls: a single datetime-local
+              reports no value at all until both halves are filled, so a date
+              entered without a time was being thrown away. */}
+          <div className="mt-1 flex gap-2">
+            <input
+              id="dueDate"
+              name="dueDate"
+              type="date"
+              value={dueDate}
+              onChange={(event) => setDueDate(event.target.value)}
+              aria-invalid={Boolean(fieldErrors.dueDate)}
+              aria-describedby="dueDate-hint"
+              className={`${inputStyles} ${fieldErrors.dueDate ? 'border-rose-400' : ''}`}
+            />
+            <input
+              id="dueTime"
+              name="dueTime"
+              type="time"
+              value={dueTime}
+              onChange={(event) => setDueTime(event.target.value)}
+              aria-label="Due time (optional)"
+              aria-describedby="dueDate-hint"
+              className={`${inputStyles} w-32`}
+            />
+          </div>
           {fieldErrors.dueDate ? (
             <p className="mt-1 text-sm text-rose-600">{fieldErrors.dueDate}</p>
           ) : (
-            <p className="mt-1 text-xs text-slate-400">Optional. Shown in your local timezone.</p>
+            <p id="dueDate-hint" className="mt-1 text-xs text-slate-400">
+              Optional. Leave the time blank and it is due by the end of that day.
+            </p>
           )}
         </div>
       </div>
 
       <div className="flex items-center gap-3 border-t border-slate-200 pt-6">
-        <button type="submit" disabled={submitting} className={buttonStyles.primary}>
+        <button type="submit" disabled={submitting || !hydrated} className={buttonStyles.primary}>
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create task'}
         </button>
         <button

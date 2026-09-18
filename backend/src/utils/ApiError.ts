@@ -16,10 +16,6 @@ export class ApiError extends Error {
     Error.captureStackTrace?.(this, ApiError);
   }
 
-  static badRequest(message: string, details?: unknown) {
-    return new ApiError(400, 'BAD_REQUEST', message, details);
-  }
-
   static notFound(message = 'Resource not found') {
     return new ApiError(404, 'NOT_FOUND', message);
   }

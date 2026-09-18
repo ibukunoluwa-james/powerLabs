@@ -12,6 +12,20 @@ interface ErrorBody {
   details?: unknown;
 }
 
+/** The shape body-parser gives its errors (malformed JSON, oversized payload...). */
+interface BodyParserError extends Error {
+  status: number;
+  type: string;
+}
+
+function isBodyParserError(error: unknown): error is BodyParserError {
+  return (
+    error instanceof Error &&
+    typeof (error as Partial<BodyParserError>).type === 'string' &&
+    typeof (error as Partial<BodyParserError>).status === 'number'
+  );
+}
+
 /** Maps any thrown value onto a predictable HTTP response shape. */
 function toErrorBody(error: unknown): ErrorBody {
   if (error instanceof ApiError) {
@@ -33,13 +47,28 @@ function toErrorBody(error: unknown): ErrorBody {
     };
   }
 
-  // express.json() rejects a malformed payload with a SyntaxError carrying the raw body.
+  // express.json() rejects an unreadable body with an error carrying an HTTP
+  // status and a `type`. These are all client mistakes, so they must not fall
+  // through to the generic 500 below (which would also log a stack for them).
+  if (isBodyParserError(error)) {
+    switch (error.type) {
+      case 'entity.parse.failed':
+        return { status: 400, code: 'INVALID_JSON', message: 'Request body is not valid JSON' };
+      case 'entity.too.large':
+        return {
+          status: 413,
+          code: 'PAYLOAD_TOO_LARGE',
+          message: 'Request body is larger than the 100kb limit',
+        };
+      default:
+        return { status: error.status, code: 'BAD_REQUEST', message: 'The request body could not be read' };
+    }
+  }
+
+  // Safety net for a JSON parse failure that arrives without body-parser's
+  // metadata: the raw body is attached to the SyntaxError either way.
   if (error instanceof SyntaxError && 'body' in error) {
-    return {
-      status: 400,
-      code: 'INVALID_JSON',
-      message: 'Request body is not valid JSON',
-    };
+    return { status: 400, code: 'INVALID_JSON', message: 'Request body is not valid JSON' };
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
